@@ -1,4 +1,5 @@
 import random
+from google import genai
 
 POS_OUTCOME=1
 NEU_OUTCOME=0
@@ -12,8 +13,16 @@ class Game:
         self.current_scene=''
         self.tempo=0
         self.game_context=[]
+        self.client = genai.Client()
+        self.chat = self.client.chats.create(model="gemini-2.5-flash")
+        
     def initialize_game(self):
+        # set he inintial scene
+        response = self.chat.send_message("You are the narrator for a classic dungeon crawler style text based RPG.  You will guide the player through a series of scenes while they make decisions that lead to their ultimate success or failure. Begin by providing a two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon")
+        print(response.text)
+        self.game_context.append(response.text)
         return
+    
     def play_game(self):
         while self.completion_meter not in [self.win_condition, self.loss_condition]:
             scene=self.request_scene()
@@ -45,6 +54,8 @@ class Game:
         return random.choice([POS_OUTCOME,NEU_OUTCOME,NEG_OUTCOME])
     
     def request_scene(self):
+        background = ' '.join(self.game_context)
+        
         scene='placeholder_scene ({})'.format(self.completion_meter) 
         return scene
     def request_options(self):
@@ -61,6 +72,9 @@ def main():
     g.initialize_game()
     g.play_game()
     return
+
+if __name__=="__main__":
+    main()
 
 # part 1: silly little dungeon crawler
 #
