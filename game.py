@@ -1,5 +1,6 @@
 import random
 from google import genai
+from google.genai import types
 
 POS_OUTCOME=1
 NEU_OUTCOME=0
@@ -7,20 +8,29 @@ NEG_OUTCOME=-1
 
 class Game:
     def __init__(self):
-        self.completion_meter=3
-        self.win_condition=7
-        self.loss_condition=0
         self.current_scene=''
         self.tempo=0
         self.game_context=[]
+        self.completion_meter=3
+        self.win_condition=7
+        self.loss_condition=0
+        self._config_text="""
+        You are the narrator for a classic dungeon crawler style text based RPG.
+        You will guide the player through a series of scenes while they make decisions that lead to their ultimate success or failure.
+        The player's progress will be tracked using a piece of hidden information called the 'completion score', which you will be told at the beginning of each round.
+        If this score reaches {}, the player wins! However if the score reaches {}, the game is lost.
+        As the player's completion score approaches {}, the drama and danger of the story should increase.
+        When you are given hidden information, do not include it directly in the story, but let it guide your narrative.
+        """.format(self.win_condition, self.loss_condition, self.win_condition)
+        self.config=types.GenerateContentConfig(system_instruction=self._config_text)
         self.client = genai.Client()
-        self.chat = self.client.chats.create(model="gemini-2.5-flash-lite")
+        self.chat = self.client.chats.create(model="gemini-2.5-flash-lite",config=self.config)
         
     def initialize_game(self):
         # set he inintial scene
-        response = self.chat.send_message("You are the narrator for a classic dungeon crawler style text based RPG.  You will guide the player through a series of scenes while they make decisions that lead to their ultimate success or failure.  At times, you will be given secret information about the game state to guide your storytelling.  When you are given secret information, do not include it directly in the story, but let it guide your narrative.  Begin by providing a two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon.  Remember details like the game objective in case they need to be referenced later.")
+        response = self.chat.send_message(" Begin by providing a two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon.  Remember details like the game objective in case they need to be referenced later.")
         # At times, you will be given secret information about the game state to guide your storytelling.  When you are given secret information, do not include it directly in the story, but let it guide your narrative.
-        print(response.text)
+        print(response.text + '\n')
         self.game_context.append(response.text)
         return
     
@@ -28,12 +38,14 @@ class Game:
         while self.completion_meter not in [self.win_condition, self.loss_condition]:
             # generate options for the player to choose based on the scene
             options=self.request_options()
-            print('1. ', options[0])
-            print('2. ', options[1])
+            print('1: ', options[0])
+            print('2: ', options[1])
+            print('3: ', options[2])
             print('\n')
             selection=''
-            while selection not in ['1','2']:
+            while selection not in ['1','2','3']:
                 selection=input("Make a selection: ")
+            print('\n')
             selected_option=options[int(selection)-1]
             
             # act on the choice made by the player
@@ -45,7 +57,6 @@ class Game:
 
             scene=self.request_scene()
             print(scene,'\n')
-
             
         if self.completion_meter==self.win_condition:
             print("you win :)")
@@ -60,17 +71,15 @@ class Game:
         return random.choice([POS_OUTCOME,POS_OUTCOME,NEU_OUTCOME,NEG_OUTCOME])
     
     def request_scene(self):
-        response = self.chat.send_message("The player has a completion score of {}.  A score of {} means that they win the game and achieve the ultimate objective of the story.  A score of {} means that the game is lost.  Now that the player has taken an action and been appropriately punished or rewarded by the fates, it is time to present them with the scene as it currently stands.  Take into account the path that has gotten them to his point, reference the objective if it is appropriate and relevant to the current scene.".format(self.completion_meter, self.win_condition, self.loss_condition))
+        response = self.chat.send_message("The player has a completion score of {}. Now that the player has taken an action and been appropriately punished or rewarded by the fates, it is time to present them with the scene as it currently stands.  Take into account the path that has gotten them to his point, reference the objective if it is appropriate and relevant to the current scene.".format(self.completion_meter, self.win_condition, self.loss_condition))
 #        background = ' '.join(self.game_context)
         scene=response.text + ' ({})'.format(self.completion_meter) 
         return scene
     
     def request_options(self):
         options=[]
-        response = self.chat.send_message("Given the scene as it currently exists, player needs to be presented with two choices to proceed. In a single sentence, present the first option. This first option should be marginally more cautious or reserved, but stull work to advance the narrative.  Do not explicitly tell the player that this is a safer path.")
-        options.append(response.text)
-        response = self.chat.send_message("Now, in a single sentence, provide a second option for the player, which might take them down a different path, but will still ultimately lead to their goal.  This option should appear somewhat more risky, with the possibility of greater success; however you should not make this explicit to the player.")
-        options.append(response.text)
+        response = self.chat.send_message("Given the scene as it currently exists, player needs to be presented with three alternative ways to proceed.  Each option should be presented in as a single sentence describing a possible action that could be taken by the player.  Separate these choices by a paragraph break. The first option should be marginally more cautious or reserved, but still work to advance the narrative. The second option should appear somewhat more risky, with the possibility of greater success. Do not explicitly tell the player that this is a safer path.  The third option should provide the player a chance to act in an unexpected way, possibly leading to a unique outcome.")
+        options = response.text.split('\n\n')
         return options
     
     def request_result(self,num_result,option):
@@ -98,7 +107,7 @@ def main():
 if __name__=="__main__":
     main()
 
-# part 1: silly little dungeon crawler
+    # part 1: silly little dungeon crawler 
 #
 # basic game loop
 #  - determine objective by prompting LLM
