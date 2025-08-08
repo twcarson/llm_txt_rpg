@@ -6,6 +6,15 @@ POS_OUTCOME=1
 NEU_OUTCOME=0
 NEG_OUTCOME=-1
 
+CAUTIOUS=10
+CAUTIOUS_CHOICE=[NEU_OUTCOME,POS_OUTCOME]
+RISKY=11
+RISKY_CHOICE=[POS_OUTCOME,NEG_OUTCOME]
+WILD=12
+WILD_CHOICE=[NEG_OUTCOME,NEU_OUTCOME,POS_OUTCOME]
+UNWISE=13
+UNWISE_CHOICE=[NEU_OUTCOME,NEG_OUTCOME]
+
 class Game:
     def __init__(self):
         self.current_scene=''
@@ -14,22 +23,15 @@ class Game:
         self.completion_meter=3
         self.win_condition=7
         self.loss_condition=0
-        self._config_text="""
-        You are the narrator for a classic dungeon crawler style text based RPG.
-        You will guide the player through a series of scenes while they make decisions that lead to their ultimate success or failure.
-        The player's progress will be tracked using a piece of hidden information called the 'completion score', which you will be told at the beginning of each round.
-        If this score reaches {}, the player wins! However if the score reaches {}, the game is lost.
-        As the player's completion score approaches {}, the drama and danger of the story should increase.
-        When you are given hidden information, do not include it directly in the story, but let it guide your narrative.
-        """.format(self.win_condition, self.loss_condition, self.win_condition)
+        with open('system_prompt.txt', 'r') as f:
+            self._config_text=f.read().format(self.win_condition, self.loss_condition, self.win_condition)
         self.config=types.GenerateContentConfig(system_instruction=self._config_text)
         self.client = genai.Client()
         self.chat = self.client.chats.create(model="gemini-2.5-flash-lite",config=self.config)
         
     def initialize_game(self):
         # set he inintial scene
-        response = self.chat.send_message(" Begin by providing a two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon.  Remember details like the game objective in case they need to be referenced later.")
-        # At times, you will be given secret information about the game state to guide your storytelling.  When you are given secret information, do not include it directly in the story, but let it guide your narrative.
+        response = self.chat.send_message("Begin by providing a two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon.  Remember details like the game objective in case they need to be referenced later.")
         print(response.text + '\n')
         self.game_context.append(response.text)
         return
@@ -38,21 +40,19 @@ class Game:
         while self.completion_meter not in [self.win_condition, self.loss_condition]:
             # generate options for the player to choose based on the scene
             options=self.request_options()
-            print('1: ', options[0])
-            print('2: ', options[1])
-            print('3: ', options[2])
+            print('1: ', options[0]['response'])
+            print('2: ', options[1]['response'])
             print('\n')
             selection=''
-            while selection not in ['1','2','3']:
+            while selection not in ['1','2']:
                 selection=input("Make a selection: ")
             print('\n')
             selected_option=options[int(selection)-1]
             
             # act on the choice made by the player
-            # currently just random, TODO game logic later
-            self.tempo=self.calculate_result() 
+            self.tempo=self.calculate_result(selected_option['dist']) 
             self.completion_meter+=self.tempo
-            text_result=self.request_result(self.tempo, selection)
+            text_result=self.request_result(self.tempo, selected_option['response'])
             print(text_result,'\n')
 
             scene=self.request_scene()
@@ -64,22 +64,39 @@ class Game:
             print("you lose :(")
         return
     
-    def calculate_result(self):
+    def calculate_result(self,outcomes):
+        if not outcomes:
         # choose a result randomly from [1,0,-1]
         # corresponding to negative, neutral, and positive outcome
-        # currently stacked to POS more often in order to better test game progression.
-        return random.choice([POS_OUTCOME,POS_OUTCOME,NEU_OUTCOME,NEG_OUTCOME])
+            return random.choice([POS_OUTCOME,NEU_OUTCOME,NEG_OUTCOME])
+        # otherwise choose randomly from the distribution provided
+        return random.choice(outcomes)
     
     def request_scene(self):
-        response = self.chat.send_message("The player has a completion score of {}. Now that the player has taken an action and been appropriately punished or rewarded by the fates, it is time to present them with the scene as it currently stands.  Take into account the path that has gotten them to his point, reference the objective if it is appropriate and relevant to the current scene.".format(self.completion_meter, self.win_condition, self.loss_condition))
-#        background = ' '.join(self.game_context)
+        prompt_request_scene="The player has a completion score of {}. Now that the player has taken an action and been appropriately punished or rewarded by the fates, it is time to present them with the scene as it currently stands.  Take into account the path that has gotten them to his point, reference the objective if it is appropriate and relevant to the current scene.".format(self.completion_meter)
+        response = self.chat.send_message(prompt_request_scene)
+        # completion score included in printout for debug purposes
         scene=response.text + ' ({})'.format(self.completion_meter) 
         return scene
     
     def request_options(self):
         options=[]
-        response = self.chat.send_message("Given the scene as it currently exists, player needs to be presented with three alternative ways to proceed.  Each option should be presented in as a single sentence describing a possible action that could be taken by the player.  Separate these choices by a paragraph break. The first option should be marginally more cautious or reserved, but still work to advance the narrative. The second option should appear somewhat more risky, with the possibility of greater success. Do not explicitly tell the player that this is a safer path.  The third option should provide the player a chance to act in an unexpected way, possibly leading to a unique outcome.")
-        options = response.text.split('\n\n')
+        prompt_cautious='should be somewhat cautious or reserved, but still work to advance the narrative'
+        prompt_risky='should appear somewhat risky, with the possibility of greater success'
+        prompt_wildcard='should provide the player a chance to act in an unexpected way, possibly leading to a unique outcome'
+        prompt_unwise='should be a reckless and inadvisable action, likely to endanger the player'
+        possible_options=[(CAUTIOUS_CHOICE,prompt_cautious,CAUTIOUS),
+                          (RISKY_CHOICE,prompt_risky,RISKY),
+                          (WILD_CHOICE,prompt_wildcard,WILD),
+                          (UNWISE_CHOICE,prompt_unwise,UNWISE)]
+        # randomly choose two of the four options.  sometimes the player will be given safe options, sometimes risky or unwise options
+        choices=random.sample(possible_options,2)
+        response = self.chat.send_message("Given the scene as it currently exists, player needs to be presented with two alternative ways to proceed.  Each option should be presented in as a single sentence describing a possible action that the player could take.  Separate these choices by a paragraph break. The first option {}. The second option {}.  Do not explicitly tell the player whether an option is safe or risky.".format(choices[0][1],choices[1][1]))
+
+        # options is a list of dicts, each containing a response and outcome distribution 
+        options=[]
+        for i,r in enumerate(response.text.split('\n\n')):
+            options.append({'dist':choices[i][0],'response':r + ' ({})'.format(choices[i][2])})
         return options
     
     def request_result(self,num_result,option):
