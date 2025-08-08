@@ -31,7 +31,16 @@ class Game:
         
     def initialize_game(self):
         # set he inintial scene
-        response = self.chat.send_message("Begin by providing a two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon.  Remember details like the game objective in case they need to be referenced later.")
+        bg_prompt="""In the format of a list, briefly describe the setting of the game by answering the following questions.  Be specific in your answers, providing examples wherever possible, so that you can use these details to guide the story later on.  This list will not be given directly to the player, but will provide the framework for the story they explore.  Remember these details to maintain continuity throughout the story.
+
+        What is the name of the place our player finds themself in?
+        What is the player's goal in this place?
+        Is the place inhabited?
+        What types of trials stand between the player and their goal?
+        """
+
+        background_info=self.chat.send_message(bg_prompt)
+        response = self.chat.send_message("Begin by providing two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon, separated by a paragraph break.")
         print(response.text + '\n')
         self.game_context.append(response.text)
         return
