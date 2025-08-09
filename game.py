@@ -15,6 +15,18 @@ WILD_CHOICE=[NEG_OUTCOME,NEU_OUTCOME,POS_OUTCOME]
 UNWISE=13
 UNWISE_CHOICE=[NEU_OUTCOME,NEG_OUTCOME]
 
+ACTIONS=["EXPLORE: explore your surroundings",
+         "ADVANCE: advance along your path; move forward",
+         "LOOT: loot, scavenge, and take useful items for later",
+         "FORAGE: forage or gather something useful from the natural environment",
+         "HIDE: hide from a threat",
+         "WAIT: hold steady and wait in the same place",
+         "SNEAK: sneak to avoid making noise",
+         "ATTACK: launch an attack on a combatant",
+         "EXAMINE: examine or inspect something directly in front of you",
+         "USE ITEM: use an item in your inventory"]
+
+
 class Game:
     def __init__(self):
         self.current_scene=''
@@ -40,15 +52,33 @@ class Game:
         """
 
         background_info=self.chat.send_message(bg_prompt)
-        response = self.chat.send_message("Begin by providing two to three brief sentences to set the stage for the player, followed by one or two sentences describing the objective at the end of the dungeon, separated by a paragraph break.")
+        response = self.chat.send_message("Begin by providing a paragraph of exposition to set the stage for the player, followed by a couple of sentences describing the objective at the end of the dungeon.  These two sections should be separated by a paragraph break.")
         print(response.text + '\n')
+        input("It is time to begin your journey.")
+        print('\n')
         self.game_context.append(response.text)
         return
     
     def play_game(self):
         while self.completion_meter not in [self.win_condition, self.loss_condition]:
-            # generate options for the player to choose based on the scene
-            options=self.request_options()
+            # generate a scene for the player.
+            scene=self.request_scene()
+            print(scene,'\n')
+
+            # generate some actions for the player to take based on the scene
+            print('What would you like to do?')
+            actions = self.get_actions()
+            for i,a in enumerate(actions):
+                # sanitize inputs in case the model does something wonky
+                print(str(i+1)+': '+a.split(':')[0])
+            selection=''
+            while selection not in ['1','2','3','4']:
+                selection=input("Make a selection: ")
+            print('\n')
+            selected_action=next(x for x in ACTIONS if x.startswith(actions[int(selection)-1].split(':')[0]))
+            # generate options for the player to choose based on the action they selected
+            options=self.request_options(selected_action)
+            print('Two options present themselves. What would you like to do?')
             print('1: ', options[0]['response'])
             print('2: ', options[1]['response'])
             print('\n')
@@ -63,16 +93,26 @@ class Game:
             self.completion_meter+=self.tempo
             text_result=self.request_result(self.tempo, selected_option['response'])
             print(text_result,'\n')
-
-            scene=self.request_scene()
-            print(scene,'\n')
             
         if self.completion_meter==self.win_condition:
             print("you win :)")
         else:
             print("you lose :(")
         return
-    
+
+    def get_actions(self):
+        prompt="""
+        consider the following list of actions:
+        {}
+        Given the current game state, select the four most relevant of these actions for the player to choose from.
+        Where appropriate, give preference to options that have not been recently used rather than reusing the same actions each turn.
+        Respond with the exact wording of the actions in ALLCAPS, with each separated by a newline.
+        """.format('\n'.join(ACTIONS))
+        response = self.chat.send_message(prompt)
+#        print(prompt)
+#        print(response.text)
+        return response.text.split('\n')
+        
     def calculate_result(self,outcomes):
         if not outcomes:
         # choose a result randomly from [1,0,-1]
@@ -82,13 +122,15 @@ class Game:
         return random.choice(outcomes)
     
     def request_scene(self):
-        prompt_request_scene="The player has a completion score of {}. Now that the player has taken an action and been appropriately punished or rewarded by the fates, it is time to present them with the scene as it currently stands.  Take into account the path that has gotten them to his point, reference the objective if it is appropriate and relevant to the current scene.".format(self.completion_meter)
+        prompt_request_scene="""The player has a completion score of {}.
+        Now that the player has taken an action and been appropriately punished or rewarded by the fates, it is time to present them with the scene as it currently stands.
+        Take into account the path that has gotten them to his point, reference the objective if it is appropriate and relevant to the current scene.""".format(self.completion_meter)
         response = self.chat.send_message(prompt_request_scene)
         # completion score included in printout for debug purposes
         scene=response.text + ' ({})'.format(self.completion_meter) 
         return scene
     
-    def request_options(self):
+    def request_options(self,action):
         options=[]
         prompt_cautious='should be somewhat cautious or reserved, but still work to advance the narrative'
         prompt_risky='should appear somewhat risky, with the possibility of greater success'
@@ -100,7 +142,14 @@ class Game:
                           (UNWISE_CHOICE,prompt_unwise,UNWISE)]
         # randomly choose two of the four options.  sometimes the player will be given safe options, sometimes risky or unwise options
         choices=random.sample(possible_options,2)
-        response = self.chat.send_message("Given the scene as it currently exists, player needs to be presented with two alternative ways to proceed.  Each option should be presented in as a single sentence describing a possible action that the player could take.  Separate these choices by a paragraph break. The first option {}. The second option {}.  Do not explicitly tell the player whether an option is safe or risky.".format(choices[0][1],choices[1][1]))
+        prompt = """
+        The player has chosen to '{}'.
+        Given the scene as it currently exists, player needs to be presented with two alternative ways to proceed.
+        Each option should be a way in which the player can complete their '{}' action.
+        Each option should be presented in as a single sentence describing a possible action that the player could take.
+        Separate these choices by a paragraph break.
+        The first option {}. The second option {}.  Do not explicitly tell the player whether an option is safe, risky, or unwise.""".format(action,action,choices[0][1],choices[1][1])
+        response = self.chat.send_message(prompt)
 
         # options is a list of dicts, each containing a response and outcome distribution 
         options=[]
@@ -120,6 +169,8 @@ class Game:
         response = self.chat.send_message(message)
         return response.text
 
+
+    # todo: pretty rendering
     def render(self,text):
         print(text)
     
@@ -133,7 +184,8 @@ def main():
 if __name__=="__main__":
     main()
 
-    # part 1: silly little dungeon crawler 
+
+# part 1: silly little dungeon crawler 
 #
 # basic game loop
 #  - determine objective by prompting LLM
